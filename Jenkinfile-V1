@@ -1,0 +1,49 @@
+import static groovy.io.FileType.FILES
+
+String latestRelease = ""
+String utilityLocation = "/home/jenkins/apps/whitesource"
+String downloadURL = ""
+
+node {
+    // Stage to get the latest published release
+    stage('Get Latest Release') {
+        // Execute get request to get the json of latest release
+        response = httpRequest httpMode: 'GET', url: "https://api.github.com/repos/whitesource/unified-agent-distribution/releases/latest",
+        consoleLogResponseBody: false
+        // Parse response content and Get the latest release and download URL
+        def jsonObj = readJSON text: response.content
+        latestRelease = jsonObj['tag_name']
+        def assets = jsonObj['assets']
+        downloadURL = assets[0]['browser_download_url']
+    }
+    
+    // Stage to compare versions and Download latest jar if current version is not latest
+    stage('Compare Versions') {
+        def filenames = [];
+        // Check if there is any version installed at all
+        def dir = new File("${utilityLocation}");
+        dir.traverse(type: FILES, maxDepth: 0) {
+            filenames.add(it.getName())
+        }
+        if (!filenames.contains("wss-unified-agent.jar")) {
+            // Simply download latest release if there is no previous installation
+            response = httpRequest httpMode: 'GET', url: "${downloadURL}", outputFile: "${env.WORKSPACE}/wss-unified-${latestRelease}.jar"
+                consoleLogResponseBody: false
+                
+            echo "Latest utility is saved at: ${env.WORKSPACE}/wss-unified-${latestRelease}.jar"
+        } else {
+            // Check the current version of the installation
+            def currentVersion = sh (script: "java -jar ${utilityLocation}/wss-unified-agent.jar -v", returnStdout: true)
+            echo "current version: ${currentVersion}"
+            if ("v${currentVersion}" == latestRelease) {
+                echo "No new release has been published!"
+            } else {
+                // Install latest release
+                echo "Downloading latest release"
+                response = httpRequest httpMode: 'GET', url: "${downloadURL}", outputFile: "${env.WORKSPACE}/wss-unified-${latestRelease}.jar"
+                consoleLogResponseBody: false
+                echo "Latest utility is saved at: ${env.WORKSPACE}/wss-unified-${latestRelease}.jar"
+            }
+        }
+    }
+}
